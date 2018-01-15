@@ -2981,47 +2981,52 @@ DataTypePtr FunctionArrayIntersect::getReturnTypeImpl(const DataTypes & argument
     return std::make_shared<DataTypeArray>(result_type);
 }
 
-void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & arguments, size_t result)
+Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
 {
-    const DataTypePtr & return_type = block.getByPosition(result).type;
     auto return_type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
-
-    if (!return_type)
-        throw Exception{"Return type for function " + getName() + " must be array.", ErrorCodes::LOGICAL_ERROR};
-
     const auto & nested_return_type = return_type_array->getNestedType();
 
-    if (typeid_cast<const DataTypeNothing *>(nested_return_type.get()))
+    DataTypePtr nullable_nested_return_type;
+    DataTypePtr nullable_return_type;
+
+    if (!nested_return_type->isNullable())
     {
-        block.getByPosition(result).column = return_type->createColumnConstWithDefaultValue(block.rows());
-        return;
+        nullable_nested_return_type = makeNullable(nested_return_type);
+        nullable_return_type = std::make_shared<DataTypeArray>(nullable_nested_return_type);
     }
 
     size_t num_args = arguments.size();
-
-    Columns preprocessed_columns(num_args);
+    Columns columns(num_args);
 
     for (size_t i = 0; i < num_args; ++i)
     {
         const ColumnWithTypeAndName & arg = block.getByPosition(arguments[i]);
-        ColumnPtr preprocessed_column = arg.column;
+        auto & column = columns[i];
 
-        if (!arg.type->equals(*return_type))
-            preprocessed_column = castColumn(arg, return_type, context);
-
-        preprocessed_columns[i] = std::move(preprocessed_column);
+        if (arg.type->equals(*return_type) || (nullable_return_type && arg.type->equals(*nullable_return_type)))
+            column = arg.column;
+        else if (arg.type->isNullable())
+            column = castColumn(arg, nullable_return_type, context);
+        else
+            column = castColumn(arg, return_type, context);
     }
 
+    return columns;
+}
+
+FunctionArrayIntersect::UnpackedArrays FunctionArrayIntersect::prepareArrays(const Columns & columns) const
+{
     UnpackedArrays arrays;
 
-    arrays.is_const.assign(num_args, false);
-    arrays.null_maps.resize(num_args);
-    arrays.offsets.resize(num_args);
-    arrays.nested_columns.resize(num_args);
+    size_t columns_number = columns.size();
+    arrays.is_const.assign(columns_number, false);
+    arrays.null_maps.resize(columns_number);
+    arrays.offsets.resize(columns_number);
+    arrays.nested_columns.resize(columns_number);
 
-    for (auto i : ext::range(0, num_args))
+    for (auto i : ext::range(0, columns_number))
     {
-        auto & argument_column = preprocessed_columns[i];
+        const auto & argument_column = columns[i];
         if (auto argument_column_const = typeid_cast<const ColumnConst *>(argument_column.get()))
         {
             arrays.is_const[i] = true;
@@ -3042,8 +3047,41 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
             throw Exception{"Arguments for function " + getName() + " must be arrays.", ErrorCodes::LOGICAL_ERROR};
     }
 
+    return arrays;
+}
+
+void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & arguments, size_t result)
+{
+    const auto & return_type = block.getByPosition(result).type;
+    auto return_type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
+
+    if (!return_type)
+        throw Exception{"Return type for function " + getName() + " must be array.", ErrorCodes::LOGICAL_ERROR};
+
+    const auto & nested_return_type = return_type_array->getNestedType();
+
+    if (typeid_cast<const DataTypeNothing *>(nested_return_type.get()))
+    {
+        block.getByPosition(result).column = return_type->createColumnConstWithDefaultValue(block.rows());
+        return;
+    }
+
+    Columns columns = castColumns(block, arguments, return_type);
+
+    UnpackedArrays arrays = prepareArrays(columns);
+
     ColumnPtr result_column;
-    TypeListNumbers::forEach(SelectExecutor(arrays, removeNullable(nested_return_type), result_column));
+    auto not_nullable_nested_return_type = removeNullable(nested_return_type);
+    TypeListNumbers::forEach(NumberExecutor(arrays, not_nullable_nested_return_type, result_column));
+
+    if (!result_column)
+    {
+        if (checkDataType<DataTypeDate>(not_nullable_nested_return_type.get()))
+            result_column = executeNumber<DataTypeDate::FieldType>(arrays);
+        else if (checkDataType<DataTypeDateTime>(not_nullable_nested_return_type.get()))
+            result_column = executeNumber<DataTypeDateTime::FieldType>(arrays);
+        else throw Exception{"Function " + getName() + " is not implemented for " + return_type->getName(), ErrorCodes::LOGICAL_ERROR};
+    }
 
     block.getByPosition(result).column = std::move(result_column);
 }

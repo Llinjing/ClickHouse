@@ -1570,18 +1570,23 @@ private:
         std::vector<const NullMap *> null_maps;
         std::vector<const ColumnArray::ColumnOffsets::Container *> offsets;
         ColumnRawPtrs nested_columns;
+
+        UnpackedArrays() = default;
     };
+
+    Columns castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const;
+    UnpackedArrays prepareArrays(const Columns & columns) const;
 
     template <typename T>
     static ColumnPtr executeNumber(const UnpackedArrays & arrays);
 
-    struct SelectExecutor
+    struct NumberExecutor
     {
         const UnpackedArrays & arrays;
         const DataTypePtr & data_type;
         ColumnPtr & result;
 
-        SelectExecutor(const UnpackedArrays & arrays, const DataTypePtr & data_type, ColumnPtr & result)
+        NumberExecutor(const UnpackedArrays & arrays, const DataTypePtr & data_type, ColumnPtr & result)
             : arrays(arrays), data_type(data_type), result(result) {}
 
         template <typename T, size_t>

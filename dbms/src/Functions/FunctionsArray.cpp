@@ -3026,14 +3026,14 @@ FunctionArrayIntersect::UnpackedArrays FunctionArrayIntersect::prepareArrays(con
 
     for (auto i : ext::range(0, columns_number))
     {
-        const auto & argument_column = columns[i];
-        if (auto argument_column_const = typeid_cast<const ColumnConst *>(argument_column.get()))
+        const auto argument_column = columns[i].get();
+        if (auto argument_column_const = typeid_cast<const ColumnConst *>(argument_column))
         {
             arrays.is_const[i] = true;
-            argument_column = argument_column_const->getDataColumnPtr();
+            argument_column = argument_column_const->getDataColumnPtr().get();
         }
 
-        if (auto argument_column_array = typeid_cast<const ColumnArray *>(argument_column.get()))
+        if (auto argument_column_array = typeid_cast<const ColumnArray *>(argument_column))
         {
             arrays.offsets[i] = &argument_column_array->getOffsets();
             arrays.nested_columns[i] = &argument_column_array->getData();

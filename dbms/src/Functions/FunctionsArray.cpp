@@ -3070,20 +3070,43 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
     auto not_nullable_nested_return_type = removeNullable(nested_return_type);
     TypeListNumbers::forEach(NumberExecutor(arrays, not_nullable_nested_return_type, result_column));
 
+    template <typename T>
+    using NumericMap = ClearableHashMap<T, size_t, DefaultHash<T>, HashTableGrower<INITIAL_SIZE_DEGREE>,
+            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(T)>>;
+
+    using StringMap = ClearableHashMap<StringRef, size_t, StringRefHash, HashTableGrower<INITIAL_SIZE_DEGREE>,
+            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(StringRef)>>;
+
     if (!result_column)
     {
+        auto column = not_nullable_nested_return_type->createColumn();
         if (checkDataType<DataTypeDate>(not_nullable_nested_return_type.get()))
-            result_column = executeNumber<DataTypeDate::FieldType>(arrays);
+            result_column = execute<NumericMap<DataTypeDate::FieldType>, ColumnVector<DataTypeDate::FieldType>, true>(arrays, std::move(column));
         else if (checkDataType<DataTypeDateTime>(not_nullable_nested_return_type.get()))
-            result_column = executeNumber<DataTypeDateTime::FieldType>(arrays);
-        else throw Exception{"Function " + getName() + " is not implemented for " + return_type->getName(), ErrorCodes::LOGICAL_ERROR};
+            result_column = execute<NumericMap<DataTypeDateTime::FieldType>, ColumnVector<DataTypeDateTime::FieldType>, true>(arrays, std::move(column));
+        else if(not_nullable_nested_return_type->isString())
+            result_column = execute<StringMap, ColumnString, false>(arrays, std::move(column));
+        else if(not_nullable_nested_return_type->isFixedString())
+            result_column = execute<StringMap, ColumnFixedString, false>(arrays, std::move(column));
+        else
+            result_column = execute<StringMap, IColumn, false>(arrays, std::move(column));
     }
 
     block.getByPosition(result).column = std::move(result_column);
 }
 
-template <typename T>
-ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
+template <typename T, size_t>
+void FunctionArrayIntersect::NumberExecutor::operator()()
+{
+    using Map = ClearableHashMap<T, size_t, DefaultHash<T>, HashTableGrower<INITIAL_SIZE_DEGREE>,
+            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(T)>>;
+
+    if (!result && typeid_cast<const DataTypeNumber<T> *>(data_type.get()))
+        result = execute<Map, ColumnVector<T>, true>(arrays, ColumnVector<T>::create());
+};
+
+template <typename Map, typename ColumnType, bool is_numeric_column>
+ColumnPtr FunctionArrayIntersect::execute(const UnpackedArrays & arrays, MutableColumnPtr result_data_ptr)
 {
     using Map = ClearableHashMap<T, size_t, DefaultHash<T>, HashTableGrower<INITIAL_SIZE_DEGREE>,
             HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(T)>>;
@@ -3093,24 +3116,25 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
 
     bool all_nullable = true;
 
-    std::vector<const ColumnVector<T> *> columns;
+    std::vector<const ColumnType *> columns;
     columns.reserve(args);
     for (auto arg : ext::range(0, args))
     {
-        columns.push_back(typeid_cast<const ColumnVector<T> *>(arrays.nested_columns[arg]));
+        columns.push_back(checkAndGetColumn<ColumnType>(arrays.nested_columns[arg]));
         if (!columns.back())
-            throw Exception("Unexpected numeric array type for function arrayIntersect", ErrorCodes::LOGICAL_ERROR);
+            throw Exception("Unexpected array type for function arrayIntersect", ErrorCodes::LOGICAL_ERROR);
 
         if (!arrays.null_maps[arg])
             all_nullable = false;
     }
 
-    auto result_data_ptr = ColumnVector<T>::create();
-    auto & result_data = static_cast<ColumnVector<T> &>(*result_data_ptr);
+    auto & result_data = static_cast<ColumnType &>(*result_data_ptr);
     auto result_offsets_ptr = ColumnArray::ColumnOffsets::create(rows);
     auto & result_offsets = static_cast<ColumnArray::ColumnOffsets &>(*result_offsets_ptr);
     auto null_map_column = ColumnUInt8::create();
     NullMap & null_map = static_cast<ColumnUInt8 &>(*null_map_column).getData();
+
+    Arena arena;
 
     Map map;
     std::vector<size_t> prev_off(args, 0);
@@ -3130,7 +3154,14 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
                 if (arrays.null_maps[arg] && (*arrays.null_maps[arg])[i])
                     current_has_nullable = true;
                 else
-                    ++map[columns[arg]->getElement(i)];
+                {
+                    if constexpr (is_numeric_column)
+                        ++map[columns[arg]->getElement(i)];
+                    else if constexpr (std::is_same<ColumnType, ColumnString>::value || std::is_same<ColumnType, ColumnFixedString>::value)
+                        ++map[columns[arg]->getData(i)];
+                    else
+                        ++map[columns[arg]->serializeValueIntoArena(i, arena, nullptr)];
+                }
             }
 
             prev_off[arg] = off;
@@ -3150,7 +3181,13 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
             if (pair.second == args)
             {
                 ++result_offset;
-                result_data.insert(pair.first);
+                if constexpr (is_numeric_column)
+                    result_data.insert(pair.first);
+                else if constexpr (std::is_same<ColumnType, ColumnString>::value || std::is_same<ColumnType, ColumnFixedString>::value)
+                    result_data.insertData(pair.first.data, pair.first.size);
+                else
+                    result_data.deserializeAndInsertFromArena(pair.first.data);
+
                 if (all_nullable)
                     null_map.push_back(0);
             }

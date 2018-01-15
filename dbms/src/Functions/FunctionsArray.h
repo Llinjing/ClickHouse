@@ -1577,8 +1577,8 @@ private:
     Columns castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const;
     UnpackedArrays prepareArrays(const Columns & columns) const;
 
-    template <typename T>
-    static ColumnPtr executeNumber(const UnpackedArrays & arrays);
+    template <typename Map, typename ColumnType, bool is_numeric_column>
+    static ColumnPtr execute(const UnpackedArrays & arrays, MutableColumnPtr result_data);
 
     struct NumberExecutor
     {
@@ -1590,17 +1590,8 @@ private:
             : arrays(arrays), data_type(data_type), result(result) {}
 
         template <typename T, size_t>
-        void operator()()
-        {
-            if (!result && typeid_cast<const DataTypeNumber<T> *>(data_type.get()))
-                result = executeNumber<T>(arrays);
-        }
+        void operator()();
     };
-
-    /*
-    ColumnPtr executeString(const UnpackedArrays & arrays) const;
-    ColumnPtr executeGeneric(const UnpackedArrays & arrays) const;
-    */
 };
 
 class FunctionArrayHasAllAny : public IFunction

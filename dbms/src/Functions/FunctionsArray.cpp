@@ -2983,13 +2983,13 @@ DataTypePtr FunctionArrayIntersect::getReturnTypeImpl(const DataTypes & argument
 
 Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
 {
-    auto return_type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
-    const auto & nested_return_type = return_type_array->getNestedType();
-
-    DataTypePtr nullable_return_type;
-
-    if (!nested_return_type->isNullable())
-        nullable_return_type = std::make_shared<DataTypeArray>(makeNullable(nested_return_type));
+//    auto return_type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
+//    const auto & nested_return_type = return_type_array->getNestedType();
+//
+//    DataTypePtr nullable_return_type;
+//
+//    if (!nested_return_type->isNullable())
+//        nullable_return_type = std::make_shared<DataTypeArray>(makeNullable(nested_return_type));
 
     size_t num_args = arguments.size();
     Columns columns(num_args);
@@ -2999,10 +2999,10 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
         const ColumnWithTypeAndName & arg = block.getByPosition(arguments[i]);
         auto & column = columns[i];
 
-        if (arg.type->equals(*return_type) || (nullable_return_type && arg.type->equals(*nullable_return_type)))
+        if (arg.type->equals(*return_type)) // || (nullable_return_type && arg.type->equals(*nullable_return_type)))
             column = arg.column;
-        else if (nullable_return_type && checkAndGetDataType<DataTypeArray>(arg.type.get())->getNestedType()->isNullable())
-            column = castColumn(arg, nullable_return_type, context);
+//        else if (nullable_return_type && checkAndGetDataType<DataTypeArray>(arg.type.get())->getNestedType()->isNullable())
+//            column = castColumn(arg, nullable_return_type, context);
         else
             column = castColumn(arg, return_type, context);
     }

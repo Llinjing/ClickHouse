@@ -3091,7 +3091,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
     auto args = arrays.nested_columns.size();
     auto rows = arrays.offsets.front()->size();
 
-    bool has_nullable = false;
+    bool all_nullable = true;
 
     std::vector<const ColumnVector<T> *> columns;
     columns.reserve(args);
@@ -3102,7 +3102,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
             throw Exception("Unexpected numeric array type for function arrayIntersect", ErrorCodes::LOGICAL_ERROR);
 
         if (arrays.null_maps[arg])
-            has_nullable = true;
+            all_nullable = false;
     }
 
     auto result_data_ptr = ColumnVector<T>::create();
@@ -3151,7 +3151,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
             {
                 ++result_offset;
                 result_data.insert(pair.first);
-                if (has_nullable)
+                if (all_nullable)
                     null_map.push_back(0);
             }
         }
@@ -3159,7 +3159,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
     }
 
     ColumnPtr result_column = std::move(result_data_ptr);
-    if (has_nullable)
+    if (all_nullable)
         result_column = ColumnNullable::create(result_column, std::move(null_map_column));
     return ColumnArray::create(result_column, std::move(result_offsets_ptr));
 }

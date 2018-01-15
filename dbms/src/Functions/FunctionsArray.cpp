@@ -2984,7 +2984,7 @@ DataTypePtr FunctionArrayIntersect::getReturnTypeImpl(const DataTypes & argument
 Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
 {
     std::function<DataTypePtr(const DataTypePtr &)> getNullableType;
-    getNullableType = [&getNullableType](const DataTypePtr & data_type) -> const DataTypePtr &
+    getNullableType = [&getNullableType](const DataTypePtr & data_type) -> DataTypePtr
     {
         if (auto type_array = checkAndGetDataType<DataTypeArray>(data_type.get()))
             return std::make_shared<DataTypeArray>(getNullableType(type_array->getNestedType()));

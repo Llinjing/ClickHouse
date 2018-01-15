@@ -3101,7 +3101,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
         if (!columns.back())
             throw Exception("Unexpected numeric array type for function arrayIntersect", ErrorCodes::LOGICAL_ERROR);
 
-        if (arrays.null_maps[arg])
+        if (!arrays.null_maps[arg])
             all_nullable = false;
     }
 

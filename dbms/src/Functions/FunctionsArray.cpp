@@ -3070,9 +3070,13 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
     auto not_nullable_nested_return_type = removeNullable(nested_return_type);
     TypeListNumbers::forEach(NumberExecutor(arrays, not_nullable_nested_return_type, result_column));
 
-    template <typename T>
-    using NumericMap = ClearableHashMap<T, size_t, DefaultHash<T>, HashTableGrower<INITIAL_SIZE_DEGREE>,
-            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(T)>>;
+    using DateMap = ClearableHashMap<DataTypeDate::FieldType, size_t, DefaultHash<DataTypeDate::FieldType>,
+            HashTableGrower<INITIAL_SIZE_DEGREE>,
+            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(DataTypeDate::FieldType)>>;
+
+    using DateTimeMap = ClearableHashMap<DataTypeDateTime::FieldType, size_t, DefaultHash<DataTypeDateTime::FieldType>,
+            HashTableGrower<INITIAL_SIZE_DEGREE>,
+            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(DataTypeDateTime::FieldType)>>;
 
     using StringMap = ClearableHashMap<StringRef, size_t, StringRefHash, HashTableGrower<INITIAL_SIZE_DEGREE>,
             HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(StringRef)>>;
@@ -3081,9 +3085,9 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
     {
         auto column = not_nullable_nested_return_type->createColumn();
         if (checkDataType<DataTypeDate>(not_nullable_nested_return_type.get()))
-            result_column = execute<NumericMap<DataTypeDate::FieldType>, ColumnVector<DataTypeDate::FieldType>, true>(arrays, std::move(column));
+            result_column = execute<DateMap, ColumnVector<DataTypeDate::FieldType>, true>(arrays, std::move(column));
         else if (checkDataType<DataTypeDateTime>(not_nullable_nested_return_type.get()))
-            result_column = execute<NumericMap<DataTypeDateTime::FieldType>, ColumnVector<DataTypeDateTime::FieldType>, true>(arrays, std::move(column));
+            result_column = execute<DateTimeMap, ColumnVector<DataTypeDateTime::FieldType>, true>(arrays, std::move(column));
         else if(not_nullable_nested_return_type->isString())
             result_column = execute<StringMap, ColumnString, false>(arrays, std::move(column));
         else if(not_nullable_nested_return_type->isFixedString())

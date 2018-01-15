@@ -3001,7 +3001,7 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
 
         if (arg.type->equals(*return_type) || (nullable_return_type && arg.type->equals(*nullable_return_type)))
             column = arg.column;
-        else if (nullable_return_type && arg.type->isNullable())
+        else if (nullable_return_type && checkAndGetDataType<DataTypeArray>(arg.type.get())->getNestedType()->isNullable())
             column = castColumn(arg, nullable_return_type, context);
         else
             column = castColumn(arg, return_type, context);

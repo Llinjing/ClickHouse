@@ -3026,7 +3026,7 @@ FunctionArrayIntersect::UnpackedArrays FunctionArrayIntersect::prepareArrays(con
 
     for (auto i : ext::range(0, columns_number))
     {
-        const auto argument_column = columns[i].get();
+        auto argument_column = columns[i].get();
         if (auto argument_column_const = typeid_cast<const ColumnConst *>(argument_column))
         {
             arrays.is_const[i] = true;

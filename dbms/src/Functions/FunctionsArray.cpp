@@ -3108,9 +3108,6 @@ void FunctionArrayIntersect::NumberExecutor::operator()()
 template <typename Map, typename ColumnType, bool is_numeric_column>
 ColumnPtr FunctionArrayIntersect::execute(const UnpackedArrays & arrays, MutableColumnPtr result_data_ptr)
 {
-    using Map = ClearableHashMap<T, size_t, DefaultHash<T>, HashTableGrower<INITIAL_SIZE_DEGREE>,
-            HashTableAllocatorWithStackMemory<(1ULL << INITIAL_SIZE_DEGREE) * sizeof(T)>>;
-
     auto args = arrays.nested_columns.size();
     auto rows = arrays.offsets.front()->size();
 

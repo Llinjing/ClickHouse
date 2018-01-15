@@ -3107,6 +3107,7 @@ ColumnPtr FunctionArrayIntersect::executeNumber(const UnpackedArrays & arrays)
         if (all_has_nullable)
         {
             ++result_offset;
+            result_data.insertDefault();
             null_map.push_back(1);
         }
 

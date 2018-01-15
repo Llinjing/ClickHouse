@@ -3161,7 +3161,10 @@ ColumnPtr FunctionArrayIntersect::execute(const UnpackedArrays & arrays, Mutable
                     else if constexpr (std::is_same<ColumnType, ColumnString>::value || std::is_same<ColumnType, ColumnFixedString>::value)
                         ++map[columns[arg]->getDataAt(i)];
                     else
-                        ++map[columns[arg]->serializeValueIntoArena(i, arena, nullptr)];
+                    {
+                        const char * data = nullptr;
+                        ++map[columns[arg]->serializeValueIntoArena(i, arena, data)];
+                    }
                 }
             }
 

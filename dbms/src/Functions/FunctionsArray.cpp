@@ -2986,14 +2986,10 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
     auto return_type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
     const auto & nested_return_type = return_type_array->getNestedType();
 
-    DataTypePtr nullable_nested_return_type;
     DataTypePtr nullable_return_type;
 
     if (!nested_return_type->isNullable())
-    {
-        nullable_nested_return_type = makeNullable(nested_return_type);
-        nullable_return_type = std::make_shared<DataTypeArray>(nullable_nested_return_type);
-    }
+        nullable_return_type = std::make_shared<DataTypeArray>(makeNullable(nested_return_type));
 
     size_t num_args = arguments.size();
     Columns columns(num_args);

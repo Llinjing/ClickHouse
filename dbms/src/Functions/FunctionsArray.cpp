@@ -3135,7 +3135,11 @@ ColumnPtr FunctionArrayIntersect::execute(const UnpackedArrays & arrays, Mutable
     columns.reserve(args);
     for (auto arg : ext::range(0, args))
     {
-        columns.push_back(checkAndGetColumn<ColumnType>(arrays.nested_columns[arg]));
+        if (std::is_same<ColumnType, IColumn>::value)
+            columns.push_back(arrays.nested_columns[arg]);
+        else
+            columns.push_back(checkAndGetColumn<ColumnType>(arrays.nested_columns[arg]));
+
         if (!columns.back())
             throw Exception("Unexpected array type for function arrayIntersect", ErrorCodes::LOGICAL_ERROR);
 

@@ -1575,7 +1575,8 @@ private:
     };
 
     ColumnPtr castRemoveNullable(const ColumnPtr & column, const DataTypePtr & data_type) const;
-    Columns castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const;
+    Columns castColumns(Block & block, const ColumnNumbers & arguments,
+                        const DataTypePtr & return_type, const DataTypePtr & return_type_with_nulls) const;
     UnpackedArrays prepareArrays(const Columns & columns) const;
 
     template <typename Map, typename ColumnType, bool is_numeric_column>

@@ -3106,7 +3106,9 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
         return castColumn(arg, data_type, context);
 }
 */
-Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
+Columns FunctionArrayIntersect::castColumns(
+        Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type,
+        const DataTypePtr & return_type_with_nulls) const
 {
     size_t num_args = arguments.size();
     Columns columns(num_args);
@@ -3120,21 +3122,11 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
                                       || type_not_nullable_nested->isStringOrFixedString();
 
     DataTypePtr nullable_return_type;
-    DataTypePtr return_type_with_nulls;
 
     if (is_numeric_or_string)
     {
         auto type_nullable_nested = makeNullable(type_nested);
         nullable_return_type = std::make_shared<DataTypeArray>(type_nullable_nested);
-    }
-    else
-    {
-        DataTypes data_types;
-        data_types.reserve(num_args);
-        for (size_t i = 0; i < num_args; ++i)
-            data_types.push_back(block.getByPosition(arguments[i]).type);
-
-        return_type_with_nulls = getMostSubtype(data_types, true, true);
     }
 
     const bool nested_is_nullable = type_nested->isNullable();
@@ -3227,7 +3219,15 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
         return;
     }
 
-    Columns columns = castColumns(block, arguments, return_type);
+    auto num_args = arguments.size();
+    DataTypes data_types;
+    data_types.reserve(num_args);
+    for (size_t i = 0; i < num_args; ++i)
+        data_types.push_back(block.getByPosition(arguments[i]).type);
+
+    auto return_type_with_nulls = getMostSubtype(data_types, true, true);
+
+    Columns columns = castColumns(block, arguments, return_type, return_type_with_nulls);
 
     UnpackedArrays arrays = prepareArrays(columns);
 
@@ -3249,6 +3249,7 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
     if (!result_column)
     {
         auto column = not_nullable_nested_return_type->createColumn();
+
         if (checkDataType<DataTypeDate>(not_nullable_nested_return_type.get()))
             result_column = execute<DateMap, ColumnVector<DataTypeDate::FieldType>, true>(arrays, std::move(column));
         else if (checkDataType<DataTypeDateTime>(not_nullable_nested_return_type.get()))
@@ -3258,7 +3259,10 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
         else if(not_nullable_nested_return_type->isFixedString())
             result_column = execute<StringMap, ColumnFixedString, false>(arrays, std::move(column));
         else
+        {
+            column = return_type_with_nulls->createColumn();
             result_column = castRemoveNullable(execute<StringMap, IColumn, false>(arrays, std::move(column)), return_type);
+        }
     }
 
     block.getByPosition(result).column = std::move(result_column);

@@ -14,7 +14,7 @@
 #include <Common/Arena.h>
 #include <Common/SipHash.h>
 #include <Common/typeid_cast.h>
-
+#include <ext/range.h>
 
 
 namespace DB
@@ -390,6 +390,29 @@ void ColumnArray::insertRangeFrom(const IColumn & src, size_t start, size_t leng
     }
 }
 
+
+MutableColumnPtr ColumnArray::filterData(const Filter & filt, ssize_t result_size_hint) const
+{
+    const auto & offsets = getOffsets();
+    auto offsets_column = ColumnArray::ColumnOffsets::create(offsets.size());
+
+    auto res = ColumnArray::create(data->filter(filt, result_size_hint), offsets_column);
+    auto & res_offsets = static_cast<ColumnArray &>(*res).getOffsets();
+
+    Offset prev_offset = 0;
+    Offset prev_res_offset = 0;
+    for (auto row : ext::range(0, offsets.size()))
+    {
+        Offset deleted_rows = 0;
+        for (auto i : ext::range(prev_offset, offsets[i]))
+            if (filt[i] == 0)
+                ++deleted_rows;
+
+        res_offsets[row] = prev_res_offset + (offsets[row] - prev_offset) - deleted_rows;
+    }
+
+    return res;
+}
 
 MutableColumnPtr ColumnArray::filter(const Filter & filt, ssize_t result_size_hint) const
 {

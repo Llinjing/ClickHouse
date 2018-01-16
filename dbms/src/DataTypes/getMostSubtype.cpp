@@ -45,7 +45,7 @@ String getExceptionMessagePrefix(const DataTypes & types)
 }
 
 
-DataTypePtr getMostSubtype(const DataTypes & types, bool throw_if_result_is_nothing)
+DataTypePtr getMostSubtype(const DataTypes & types, bool throw_if_result_is_nothing, bool do_not_suppress_nulls)
 {
 
     auto getNothingOrThrow = [throw_if_result_is_nothing, & types](const std::string & reason)
@@ -195,7 +195,7 @@ DataTypePtr getMostSubtype(const DataTypes & types, bool throw_if_result_is_noth
 
         if (have_nullable)
         {
-            if (all_nullable)
+            if (all_nullable || do_not_suppress_nulls)
                 return std::make_shared<DataTypeNullable>(getMostSubtype(nested_types, false));
 
             return getMostSubtype(nested_types, throw_if_result_is_nothing);

@@ -2981,10 +2981,69 @@ DataTypePtr FunctionArrayIntersect::getReturnTypeImpl(const DataTypes & argument
     return std::make_shared<DataTypeArray>(result_type);
 }
 
+ColumnPtr FunctionArrayIntersect::castRemoveNullable(const ColumnPtr & column, const DataTypePtr & data_type) const
+{
+    if (auto column_nullable = checkAndGetColumn<ColumnNullable>(column.get()))
+    {
+        auto nullable_type = checkAndGetDataType<DataTypeNullable>(data_type.get());
+        const auto & nested = column_nullable->getNestedColumnPtr();
+        if (nullable_type)
+        {
+            auto casted_column = castRemoveNullable(nested, nullable_type->getNestedType());
+            return ColumnNullable::create(casted_column, column_nullable->getNullMapColumnPtr());
+        }
+        return castRemoveNullable(nested, data_type);
+    }
+    else if (auto column_array = checkAndGetColumn<ColumnArray>(column.get()))
+    {
+        auto array_type = checkAndGetDataType<DataTypeArray>(data_type.get());
+        if (!array_type)
+            throw Exception{"Cannot cast array column to column with type "
+                            + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
+        auto casted_column = castRemoveNullable(column_array->getDataPtr(), array_type->getNestedType());
+        return ColumnArray::create(casted_column, column_array->getOffsetsPtr());
+    }
+    else if (auto column_tuple = checkAndGetColumn<ColumnTuple>(column.get()))
+    {
+        auto tuple_type = checkAndGetDataType<DataTypeTuple>(data_type.get());
+
+        if (!tuple_type)
+            throw Exception{"Cannot cast tuple column to type "
+                            + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
+        auto columns_number = column_tuple->getColumns().size();
+        Columns columns(columns_number);
+
+        const auto & types = tuple_type->getElements();
+
+        for (auto i : ext::range(0, columns_number))
+        {
+            columns[i] = castRemoveNullable(column_tuple->getColumnPtr(i), types[i]);
+        }
+        return ColumnTuple::create(columns);
+    }
+
+    return column;
+}
+
+/*
 ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndName & arg, const DataTypePtr & data_type) const
 {
     if (data_type->isNullable())
         return castColumn(arg, data_type, context);
+
+    auto getFilterFromNullableColumn = [](const ColumnNullable & column_nullable)
+    {
+        const auto & null_map = column_nullable.getNullMapData();
+        auto size = null_map.size();
+        IColumn::Filter filter(size, 0);
+        for (auto row : ext::range(0, size))
+            if (null_map[row] == 0)
+                filter[row] = 1;
+
+        return filter;
+    };
 
     if (auto column_nullable = checkAndGetColumn<ColumnNullable>(arg.column.get()))
     {
@@ -2993,15 +3052,8 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
             throw Exception{"Cannot cast nullable column with type " + arg.type->getName() + " to type "
                             + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
 
-        const auto & null_map = column_nullable->getNullMapData();
+        auto filter = getFilterFromNullableColumn(*column_nullable);
         const auto & nested = column_nullable->getNestedColumn();
-
-        auto size = null_map.size();
-        IColumn::Filter filter(size, 0);
-        for (auto row : ext::range(0, size))
-            if (null_map[row] == 0)
-            filter[row] = 1;
-
         ColumnWithTypeAndName column(nested.filter(filter, 0), data_type_nullable->getNestedType(), arg.name);
         return castColumn(column, data_type, context);
     }
@@ -3013,6 +3065,16 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
         if (!left_array_type || !right_array_type)
             throw Exception{"Cannot cast array column with type " + arg.type->getName() + " to type "
                             + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
+        if (auto data_column_nullable = checkAndGetColumn<ColumnNullable>(&column_array->getData()))
+        {
+            auto filter = getFilterFromNullableColumn(*data_column_nullable);
+            auto not_nullable_array = ColumnArray::create(data_column_nullable->getNestedColumnPtr(), column_array->getOffsetsPtr());
+            auto filtered_array = static_cast<ColumnArray &>(*not_nullable_array).filterData(filter, 0);
+            auto filtered_array_type = std::make_shared<DataTypeArray>(removeNullable(left_array_type->getNestedType()));
+            ColumnWithTypeAndName column(std::move(filtered_array), filtered_array_type, arg.name);
+            return castColumn(column, data_type, context);
+        }
 
         ColumnWithTypeAndName column(column_array->getDataPtr(), left_array_type->getNestedType(), arg.name);
         ColumnPtr casted_column = castAndFilterNullable(column, right_array_type->getNestedType());
@@ -3043,7 +3105,7 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
     else
         return castColumn(arg, data_type, context);
 }
-
+*/
 Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
 {
     size_t num_args = arguments.size();
@@ -3058,11 +3120,21 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
                                       || type_not_nullable_nested->isStringOrFixedString();
 
     DataTypePtr nullable_return_type;
+    DataTypePtr return_type_with_nulls;
 
     if (is_numeric_or_string)
     {
         auto type_nullable_nested = makeNullable(type_nested);
         nullable_return_type = std::make_shared<DataTypeArray>(type_nullable_nested);
+    }
+    else
+    {
+        DataTypes data_types;
+        data_types.reserve(num_args);
+        for (size_t i = 0; i < num_args; ++i)
+            data_types.push_back(block.getByPosition(arguments[i]).type);
+
+        return_type_with_nulls = getMostSubtype(data_types, true, true);
     }
 
     const bool nested_is_nullable = type_nested->isNullable();
@@ -3096,7 +3168,7 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
             if (arg.type->equals(*return_type))
                 column = arg.column;
             else
-                column = castAndFilterNullable(arg, return_type);
+                column = castColumn(arg, return_type_with_nulls, context);
         }
     }
 
@@ -3186,7 +3258,7 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
         else if(not_nullable_nested_return_type->isFixedString())
             result_column = execute<StringMap, ColumnFixedString, false>(arrays, std::move(column));
         else
-            result_column = execute<StringMap, IColumn, false>(arrays, std::move(column));
+            result_column = castRemoveNullable(execute<StringMap, IColumn, false>(arrays, std::move(column)), return_type);
     }
 
     block.getByPosition(result).column = std::move(result_column);

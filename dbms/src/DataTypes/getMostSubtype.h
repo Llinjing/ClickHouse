@@ -10,7 +10,9 @@ namespace DB
   * DataTypeNothing is the most common subtype for all types.
   * Examples: most common subtype for UInt16, UInt8 and Int8 - Unt16.
   * Examples: most common subtype for Array(UInt8), Int8 is Nothing
+  *
+  * If do_not_suppress_nulls is true, returns Nullable(T) is has at least one Nullable.
   */
-DataTypePtr getMostSubtype(const DataTypes & types, bool throw_if_result_is_nothing = false);
+DataTypePtr getMostSubtype(const DataTypes & types, bool throw_if_result_is_nothing = false, bool do_not_suppress_nulls = false);
 
 }

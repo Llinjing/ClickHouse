@@ -3165,7 +3165,7 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
         }
         else
         {
-            if (arg.type->equals(*return_type))
+            if (arg.type->equals(*return_type_with_nulls))
                 column = arg.column;
             else
                 column = castColumn(arg, return_type_with_nulls, context);

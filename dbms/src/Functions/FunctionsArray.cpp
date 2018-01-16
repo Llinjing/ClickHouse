@@ -3313,7 +3313,7 @@ ColumnPtr FunctionArrayIntersect::execute(const UnpackedArrays & arrays, Mutable
     {
         map.clear();
 
-        bool all_has_nullable = true;
+        bool all_has_nullable = all_nullable;
 
         for (auto arg : ext::range(0, args))
         {

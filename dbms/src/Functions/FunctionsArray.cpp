@@ -3260,7 +3260,7 @@ void FunctionArrayIntersect::executeImpl(Block & block, const ColumnNumbers & ar
             result_column = execute<StringMap, ColumnFixedString, false>(arrays, std::move(column));
         else
         {
-            column = static_cast<const DataTypeArray &>(*return_type_with_nulls).createColumn();
+            column = static_cast<const DataTypeArray &>(*return_type_with_nulls).getNestedType()->createColumn();
             result_column = castRemoveNullable(execute<StringMap, IColumn, false>(arrays, std::move(column)), return_type);
         }
     }

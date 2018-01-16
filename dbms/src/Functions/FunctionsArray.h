@@ -1574,6 +1574,7 @@ private:
         UnpackedArrays() = default;
     };
 
+    ColumnPtr castAndFilterNullable(const ColumnWithTypeAndName & arg, const DataTypePtr & data_type) const;
     Columns castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const;
     UnpackedArrays prepareArrays(const Columns & columns) const;
 

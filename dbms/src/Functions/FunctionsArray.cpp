@@ -2981,44 +2981,114 @@ DataTypePtr FunctionArrayIntersect::getReturnTypeImpl(const DataTypes & argument
     return std::make_shared<DataTypeArray>(result_type);
 }
 
+ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndName & arg, const DataTypePtr & data_type) const
+{
+    if (data_type->isNullable())
+        return castColumn(arg, data_type, context);
+
+    if (auto column_nullable = checkAndGetColumn<ColumnNullable>(arg.column.get()))
+    {
+        const auto & null_map = column_nullable->getNullMapData();
+        const auto & nested = column_nullable->getNestedColumn();
+
+        auto size = null_map.size();
+        IColumn::Filter filter(size, 0);
+        for (auto row : ext::range(0, size))
+            if (null_map[row] == 0)
+            filter[row] = 1;
+
+        ColumnWithTypeAndName column = arg;
+        column.column = nested.filter(filter, 0);
+
+        return castColumn(column, data_type, context);
+    }
+    else if (auto column_array = checkAndGetColumn<ColumnArray>(arg.column.get()))
+    {
+        auto left_array_type = checkAndGetDataType<DataTypeArray>(arg.type.get());
+        auto right_array_type = checkAndGetDataType<DataTypeArray>(data_type.get());
+
+        if (!left_array_type || !right_array_type)
+            throw Exception{"Cannot cast array column with type " + arg.type->getName() + " to type "
+                            + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
+        ColumnWithTypeAndName column(column_array->getDataPtr(), left_array_type->getNestedType(), arg.name);
+        ColumnPtr casted_column = castAndFilterNullable(column, right_array_type->getNestedType());
+        return ColumnArray::create(casted_column, column_array->getOffsetsPtr());
+    }
+    else if (auto column_tuple = checkAndGetColumn<ColumnTuple>(arg.column.get()))
+    {
+        auto left_tuple_type = checkAndGetDataType<DataTypeTuple>(arg.type.get());
+        auto right_tuple_type = checkAndGetDataType<DataTypeTuple>(data_type.get());
+
+        if (!left_tuple_type || !right_tuple_type)
+            throw Exception{"Cannot cast tuple column with type " + arg.type->getName() + " to type "
+                            + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
+        auto columns_number = column_tuple->getColumns().size();
+        Columns columns(columns_number);
+
+        const auto & left_types = left_tuple_type->getElements();
+        const auto & right_types = right_tuple_type->getElements();
+
+        for (auto i : ext::range(0, columns_number))
+        {
+            ColumnWithTypeAndName column(column_tuple->getColumnPtr(i), left_types[i], arg.name);
+            columns[i] = castAndFilterNullable(column, right_types[i]);
+        }
+        return ColumnTuple::create(columns);
+    }
+    else
+        return castColumn(arg, data_type, context);
+}
+
 Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers & arguments, const DataTypePtr & return_type) const
 {
-    std::function<DataTypePtr(const DataTypePtr &)> getNullableType;
-    getNullableType = [&getNullableType](const DataTypePtr & data_type) -> DataTypePtr
-    {
-        if (auto type_array = checkAndGetDataType<DataTypeArray>(data_type.get()))
-            return std::make_shared<DataTypeArray>(getNullableType(type_array->getNestedType()));
-        else if (data_type->canBeInsideNullable())
-            return makeNullable(data_type);
-        else
-            return data_type;
-    };
-
-    std::function<bool(const DataTypePtr &)> hasNullableType;
-    hasNullableType = [&hasNullableType](const DataTypePtr & data_type) -> bool
-    {
-        if (auto type_array = checkAndGetDataType<DataTypeArray>(data_type.get()))
-            return hasNullableType(type_array->getNestedType());
-
-        return data_type->isNullable();
-    };
-
-    auto nullable_return_type = getNullableType(return_type);
-
     size_t num_args = arguments.size();
     Columns columns(num_args);
+
+    auto type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
+    auto & type_nested = type_array->getNestedType();
+    auto type_not_nullable_nested = removeNullable(type_nested);
+    auto type_nullable_nested = makeNullable(type_nested);
+    auto nullable_return_type = std::make_shared<DataTypeArray>(type_nullable_nested);
+
+    const bool is_numeric_or_string = type_not_nullable_nested->isNumber()
+                                      || type_not_nullable_nested->isDateOrDateTime()
+                                      || type_not_nullable_nested->isStringOrFixedString();
+
+    const bool nested_is_nullable = type_nested->isNullable();
 
     for (size_t i = 0; i < num_args; ++i)
     {
         const ColumnWithTypeAndName & arg = block.getByPosition(arguments[i]);
         auto & column = columns[i];
 
-        if (arg.type->equals(*return_type) || arg.type->equals(*nullable_return_type))
-            column = arg.column;
-        else if (hasNullableType(arg.type))
-            column = castColumn(arg, nullable_return_type, context);
+        if (is_numeric_or_string)
+        {
+            if (nested_is_nullable)
+            {
+                if (arg.type->equals(*return_type))
+                    column = arg.column;
+                else
+                    column = castColumn(arg, return_type, context);
+            }
+            else
+            {
+                if (arg.type->equals(*return_type) || arg.type->equals(*nullable_return_type))
+                    column = arg.column;
+                else if (arg.type->isNullable())
+                    column = castColumn(arg, nullable_return_type, context);
+                else
+                    column = castColumn(arg, return_type, context);
+            }
+        }
         else
-            column = castColumn(arg, return_type, context);
+        {
+            if (arg.type->equals(*return_type))
+                column = arg.column;
+            else
+                column = castAndFilterNullable(arg, return_type);
+        }
     }
 
     return columns;

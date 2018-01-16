@@ -3049,12 +3049,18 @@ Columns FunctionArrayIntersect::castColumns(Block & block, const ColumnNumbers &
     auto type_array = checkAndGetDataType<DataTypeArray>(return_type.get());
     auto & type_nested = type_array->getNestedType();
     auto type_not_nullable_nested = removeNullable(type_nested);
-    auto type_nullable_nested = makeNullable(type_nested);
-    auto nullable_return_type = std::make_shared<DataTypeArray>(type_nullable_nested);
 
     const bool is_numeric_or_string = type_not_nullable_nested->isNumber()
                                       || type_not_nullable_nested->isDateOrDateTime()
                                       || type_not_nullable_nested->isStringOrFixedString();
+
+    DataTypePtr nullable_return_type;
+
+    if (is_numeric_or_string)
+    {
+        auto type_nullable_nested = makeNullable(type_nested);
+        nullable_return_type = std::make_shared<DataTypeArray>(type_nullable_nested);
+    }
 
     const bool nested_is_nullable = type_nested->isNullable();
 

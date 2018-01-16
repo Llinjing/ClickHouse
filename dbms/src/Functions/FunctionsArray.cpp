@@ -2988,6 +2988,11 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
 
     if (auto column_nullable = checkAndGetColumn<ColumnNullable>(arg.column.get()))
     {
+        auto data_type_nullable = checkAndGetDataType<DataTypeNullable>(arg.type.get());
+        if (!data_type_nullable)
+            throw Exception{"Cannot cast nullable column with type " + arg.type->getName() + " to type "
+                            + data_type->getName() + " in function " + getName(), ErrorCodes::LOGICAL_ERROR};
+
         const auto & null_map = column_nullable->getNullMapData();
         const auto & nested = column_nullable->getNestedColumn();
 
@@ -2997,9 +3002,7 @@ ColumnPtr FunctionArrayIntersect::castAndFilterNullable(const ColumnWithTypeAndN
             if (null_map[row] == 0)
             filter[row] = 1;
 
-        ColumnWithTypeAndName column = arg;
-        column.column = nested.filter(filter, 0);
-
+        ColumnWithTypeAndName column(nested.filter(filter, 0), data_type_nullable->getNestedType(), arg.name);
         return castColumn(column, data_type, context);
     }
     else if (auto column_array = checkAndGetColumn<ColumnArray>(arg.column.get()))
